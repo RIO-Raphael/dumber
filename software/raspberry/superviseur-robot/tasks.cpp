@@ -26,6 +26,7 @@
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
 #define PRIORITY_TCAMERA 21
+#define CST_PERTE_MEDIUM_ROBOT 3
 
 /*
  * Some remarks:
@@ -73,6 +74,10 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_ComRobotCheck, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -91,6 +96,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_sem_create(&sem_startRobot, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_sem_create(&sem_ComRobotCheck, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -234,7 +243,7 @@ void Tasks::SendToMonTask(void* arg) {
         msg = ReadInQueue(&q_messageToMon);
         cout << "Send msg to mon: " << msg->ToString() << endl << flush;
         rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
-        monitor.Write(msg); // The message is deleted with the Write
+        monitor.Write(msg); // The message is deleted with the Write    //A FAIRE Travail sur les 10 ms en etat de Recherche incomprise 
         rt_mutex_release(&mutex_monitor);
     }
 }
@@ -261,6 +270,8 @@ void Tasks::ReceiveFromMonTask(void *arg) {
 
         if (msgRcv->CompareID(MESSAGE_MONITOR_LOST)) {
             delete(msgRcv);
+            Stop(); //Fonction 6 : On stoppe le robot //On arrete le serveur
+            //On est dans l'état de démarrage du superviseur
             exit(-1);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_COM_OPEN)) {
             rt_sem_v(&sem_openComRobot);
@@ -342,6 +353,10 @@ void Tasks::StartRobotTask(void *arg) {
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 1;
             rt_mutex_release(&mutex_robotStarted);
+        }else{
+            rt_mutex_acquire(&mutex_ComRobotCheck, TM_INFINITE);
+            c_perte_robot++;
+            rt_mutex_release(&mutex_ComRobotCheck);
         }
     }
 }
@@ -413,5 +428,20 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
     } /**/
 
     return msg;
+}
+
+//On écrit un message et on envoie un ordre au robot
+Message* Tasks::Write(Message* msg){
+    Message* msgSend;
+    rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+    msgSend = robot.Write(msg);
+    rt_mutex_release(&mutex_robot);
+    rt_mutex_acquire(&mutex_ComRobotCheck, TM_INFINITE);
+    c_perte_robot++;
+    if (c_perte_robot>=CST_PERTE_MEDIUM_ROBOT){
+         rt_sem_broadcast(&sem_ComRobotCheck);
+         c_perte_robot=0;
+    }
+    rt_mutex_release(&mutex_ComRobotCheck);
 }
 
