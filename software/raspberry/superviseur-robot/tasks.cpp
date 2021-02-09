@@ -26,6 +26,7 @@
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
 #define PRIORITY_TCAMERA 21
+#define PRIORITY_TCHECKBATTERY 20
 
 /*
  * Some remarks:
@@ -39,11 +40,11 @@
  * 4- Take into account that ComRobot::Write will block your task when serial buffer is full,
  *   time for internal buffer to flush
  * 
- * 5- Same behavior existe for ComMonitor::Write !
+ * 5- Same behavior existe for ComMonitor::Write!
  * 
  * 6- When you want to write something in terminal, use cout and terminate with endl and flush
  * 
- * 7- Good luck !
+ * 7- Good luck!
  */
 
 /**
@@ -123,6 +124,10 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_task_create(&th_checkBattery, "th_checkBattery", 0, PRIORITY_TCHECKBATTERY, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     cout << "Tasks created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -164,6 +169,10 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_move, (void(*)(void*)) & Tasks::MoveTask, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_checkBattery, (void(*)(void*)) & Tasks::CheckBattery, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -232,7 +241,7 @@ void Tasks::SendToMonTask(void* arg) {
     while (1) {
         cout << "wait msg to send" << endl << flush;
         msg = ReadInQueue(&q_messageToMon);
-        cout << "Send msg to mon: " << msg->ToString() << endl << flush;
+        cout << "\n Send msg to mon: " << msg->ToString() << endl << flush;
         rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
         monitor.Write(msg); // The message is deleted with the Write
         rt_mutex_release(&mutex_monitor);
@@ -382,6 +391,42 @@ void Tasks::MoveTask(void *arg) {
         cout << endl << flush;
     }
 }
+
+/**
+* @brief Thread handling battery checking.
+*/
+void Tasks::CheckBattery(void *arg){
+    int rs;
+    MessageBattery* msg;
+    
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    
+    /**************************************************************************************/
+    /* The task starts here                                                               */
+    /**************************************************************************************/
+    rt_task_set_periodic(NULL, TM_NOW, 500000000);
+    
+    while(1){
+        rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
+        rs = robotStarted;
+        rt_mutex_release(&mutex_robotStarted);
+        if (rs == 1) {
+            rt_task_wait_period(NULL);
+            cout << "Periodic checking of battery level : " << endl << flush;
+            rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+            msg = (MessageBattery*)robot.Write(robot.GetBattery());
+            rt_mutex_release(&mutex_robot);
+            WriteInQueue(&q_messageToMon, msg); // or monitor.Write(msg); 
+            // msg is deleted after being sent
+        }
+    }
+}
+
+/**********************************************************************/
+/* Queue services                                                     */
+/**********************************************************************/
 
 /**
  * Write a message in a given queue

@@ -70,7 +70,7 @@ public:
      * @param msg Message to send to robot
      * @return A message containing either an answer (Ack/Nak/Timeout/Error) or a value (battery level, robot state) depending of the command
      * @attention Input message is destroyed (delete) after being sent. You do not need to delete it yourself
-     * @attention Write produce an answer message. You have to dispose it (delete) when you have finished using it
+     * @attention Write produces an answer message. You have to dispose it (delete) when you have finished using it
      * @attention Write is blocking until message is written into buffer (linux side)
      * @warning Write is not thread save : check that multiple tasks can't access this method simultaneously  
      */
