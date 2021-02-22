@@ -214,12 +214,15 @@ void Tasks::ServerTask(void *arg) {
     rt_mutex_release(&mutex_monitor);
 
     cout << "Open server on port " << (SERVER_PORT) << " (" << status << ")" << endl;
-
+    
+    //##### QST ###########
     if (status < 0) throw std::runtime_error {
         "Unable to start server on port " + std::to_string(SERVER_PORT)
     };
+    rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
     monitor.AcceptClient(); // Wait the monitor client
     cout << "Rock'n'Roll baby, client accepted!" << endl << flush;
+    rt_mutex_release(&mutex_monitor);
     rt_sem_broadcast(&sem_serverOk);
 }
 
