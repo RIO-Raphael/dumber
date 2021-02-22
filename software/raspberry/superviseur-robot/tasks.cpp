@@ -75,10 +75,6 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_mutex_create(&mutex_ComRobotCheck, NULL)) {
-        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
     cout << "Mutexes created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -365,10 +361,6 @@ void Tasks::StartRobotTask(void *arg) {
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 1;
             rt_mutex_release(&mutex_robotStarted);
-        }else{
-            rt_mutex_acquire(&mutex_ComRobotCheck, TM_INFINITE);
-            c_perte_robot++;
-            rt_mutex_release(&mutex_ComRobotCheck);
         }
     }
 }
@@ -484,12 +476,5 @@ Message* Tasks::Write(Message* msg){
     rt_mutex_acquire(&mutex_robot, TM_INFINITE);
     msgSend = robot.Write(msg);
     rt_mutex_release(&mutex_robot);
-    rt_mutex_acquire(&mutex_ComRobotCheck, TM_INFINITE);
-    c_perte_robot++;
-    if (c_perte_robot>=CST_PERTE_MEDIUM_ROBOT){
-         rt_sem_broadcast(&sem_ComRobotCheck);
-         c_perte_robot=0;
-    }
-    rt_mutex_release(&mutex_ComRobotCheck);
 }
 
