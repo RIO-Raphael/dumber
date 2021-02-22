@@ -69,8 +69,6 @@ private:
     ComRobot robot;
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
-    //Compteur pour la perte de co avec le robot
-    int perte_comRobot = 0;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -83,7 +81,7 @@ private:
     RT_TASK th_move;
     RT_TASK th_SWD;
     RT_TASK th_WD;
-    RT_TASK th_reload_WD;
+    RT_TASK th_reloadWD;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -92,7 +90,6 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
-    RT_MUTEX mutex_pertecomRobot;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -146,6 +143,21 @@ private:
      * @brief Thread handling control of the robot.
      */
     void MoveTask(void *arg);
+    
+    /**
+     * @brief Thread reload WD
+     */
+    void reloadWD(void);
+    
+    /**
+     * @brief Thread starting WD.
+     */
+    void WD(void);
+    
+    /**
+     * @brief Thread Starting without WD.
+     */
+    void SWD(void);
     
     /**********************************************************************/
     /* Queue services                                                     */

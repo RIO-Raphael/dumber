@@ -74,12 +74,8 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_mutex_create(&mutex_ComRobotCheck, NULL)) {
-        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
     cout << "Mutexes created successfully" << endl << flush;
-
+    
     /**************************************************************************************/
     /* 	Semaphors creation       							  */
     /**************************************************************************************/
@@ -99,10 +95,15 @@ void Tasks::Init() {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_sem_create(&sem_ComRobotCheck, NULL, 0, S_FIFO)) {
+    if (err = rt_sem_create(&sem_SWD, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_sem_create(&sem_WD, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+
     cout << "Semaphores created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -129,6 +130,18 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_create(&th_move, "th_move", 0, PRIORITY_TMOVE, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_WD, "th_WD", 0, PRIORITY_TMOVE, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_SWD, "th_SWD", 0, PRIORITY_TMOVE, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_reloadWD, "th_reloadWD", 0, PRIORITY_TMOVE, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -173,6 +186,18 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_move, (void(*)(void*)) & Tasks::MoveTask, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_reloadWD, (void(*)(void*)) & Tasks::reloadWD, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_WD, (void(*)(void*)) & Tasks::WD, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_SWD, (void(*)(void*)) & Tasks::SWD, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -356,10 +381,6 @@ void Tasks::StartRobotTask(void *arg) {
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 1;
             rt_mutex_release(&mutex_robotStarted);
-        }else{
-            rt_mutex_acquire(&mutex_ComRobotCheck, TM_INFINITE);
-            c_perte_robot++;
-            rt_mutex_release(&mutex_ComRobotCheck);
         }
     }
 }
@@ -439,12 +460,56 @@ Message* Tasks::Write(Message* msg){
     rt_mutex_acquire(&mutex_robot, TM_INFINITE);
     msgSend = robot.Write(msg);
     rt_mutex_release(&mutex_robot);
-    rt_mutex_acquire(&mutex_ComRobotCheck, TM_INFINITE);
-    c_perte_robot++;
-    if (c_perte_robot>=CST_PERTE_MEDIUM_ROBOT){
-         rt_sem_broadcast(&sem_ComRobotCheck);
-         c_perte_robot=0;
-    }
-    rt_mutex_release(&mutex_ComRobotCheck);
+    
 }
 
+void Tasks::WD(void){
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    rt_sem_p(&sem_WD, TM_INFINITE);
+    
+    Message* msg_ACK;
+    //On écrit un message au robot
+    Message* msg_WD=new Message(MESSAGE_ROBOT_START_WITH_WD);
+    msg_ACK=Write(msg_WD);
+    
+    //On teste le retour du robot
+    if (msg_ACK->CompareID(MESSAGE_ANSWER_ACK)){
+        rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
+        robotStarted = 1;
+        rt_mutex_release(&mutex_robotStarted);
+    }
+    //On écrit un message au monitor acquitement
+    WriteInQueue(&q_messageToMon,msg_ACK);
+}
+
+void Tasks::SWD(void){
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    rt_sem_p(&sem_SWD, TM_INFINITE);
+    
+    Message* msg_ACK;
+    //On écrit un message au robot
+    Message* msg_SWD=new Message(MESSAGE_ROBOT_START_WITHOUT_WD);
+    msg_ACK=Write(msg_SWD);
+    
+    //On teste le retour du robot
+    if (msg_ACK->CompareID(MESSAGE_ANSWER_ACK)){
+        rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
+        robotStarted = 1;
+        rt_mutex_release(&mutex_robotStarted);
+    }
+    //On écrit un message au monitor acquitement
+    WriteInQueue(&q_messageToMon,msg_ACK);
+    
+    
+}
+
+void Tasks::reloadWD(void){
+    int c_reload=0;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    rt_sem_p(&sem_WD, TM_INFINITE);
+    
+    
+}
