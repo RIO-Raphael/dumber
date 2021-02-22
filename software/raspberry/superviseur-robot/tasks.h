@@ -38,6 +38,9 @@ using namespace std;
 
 class Tasks {
 public:
+    
+    
+    
     /**
      * @brief Initializes main structures (semaphores, tasks, mutex, etc.)
      */
@@ -66,6 +69,8 @@ private:
     ComRobot robot;
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
+    //Compteur pour la perte de co avec le robot
+    int c_perte_robot;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -85,6 +90,7 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
+    RT_MUTEX mutex_ComRobotCheck;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -93,7 +99,10 @@ private:
     RT_SEM sem_openComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
-
+    //FLAG pour voir si la communication est établie avec le robot
+    RT_SEM sem_ComRobotCheck;
+    
+    
     /**********************************************************************/
     /* Message queues                                                     */
     /**********************************************************************/
@@ -154,6 +163,9 @@ private:
      * @return Message read
      */
     Message *ReadInQueue(RT_QUEUE *queue);
+    
+    //On écrit un message et on envoie un ordre au robot
+    Message *Write(Message* msg);
 
 };
 

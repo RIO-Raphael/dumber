@@ -31,7 +31,6 @@ using namespace std;
  */
 class ComRobot {
 public:
-
     /**
      * Constructor
      */
