@@ -70,7 +70,7 @@ private:
     int robotStarted = 0;
     int move = MESSAGE_ROBOT_STOP;
     //Compteur pour la perte de co avec le robot
-    int c_perte_robot;
+    int perte_comRobot = 0;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -81,6 +81,9 @@ private:
     RT_TASK th_openComRobot;
     RT_TASK th_startRobot;
     RT_TASK th_move;
+    RT_TASK th_SWD;
+    RT_TASK th_WD;
+    RT_TASK th_reload_WD;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -89,7 +92,7 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
-    RT_MUTEX mutex_ComRobotCheck;
+    RT_MUTEX mutex_pertecomRobot;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -100,6 +103,9 @@ private:
     RT_SEM sem_startRobot;
     //FLAG pour voir si la communication est établie avec le robot
     RT_SEM sem_ComRobotCheck;
+    RT_SEM sem_SWD;
+    RT_SEM sem_WD;
+    
     
     
     /**********************************************************************/
