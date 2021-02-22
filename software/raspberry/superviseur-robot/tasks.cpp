@@ -54,6 +54,7 @@
 void Tasks::Init() {
     int status;
     int err;
+    b_reloadWD=false;
 
     /**************************************************************************************/
     /* 	Mutex creation                                                                    */
@@ -71,6 +72,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_mutex_create(&mutex_move, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+     if (err = rt_mutex_create(&mutex_reloadWD, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -314,6 +319,17 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_mutex_acquire(&mutex_move, TM_INFINITE);
             move = msgRcv->GetID();
             rt_mutex_release(&mutex_move);
+        }else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITH_WD){
+            rt_sem_broadcast(&sem_WD);
+        }else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD){
+            rt_sem_broadcast(&sem_SWD);
+        }else if (msgRcv->CompareID(MESSAGE_ROBOT_RELOAD_WD){
+            Message* msg_reloadWD=new Message(MESSAGE_ROBOT_START_WITHOUT_WD);
+            //On écrit un message au monitor acquitement
+            WriteInQueue(&q_messageToMon,msg_reloadWD);
+            rt_mutex_acquire(&mutex_reloadWD, TM_INFINITE);
+            b_reloadWD=true;
+            rt_mutex_release(&mutex_reloadWD);
         }
         delete(msgRcv); // mus be deleted manually, no consumer
     }
@@ -507,9 +523,41 @@ void Tasks::SWD(void){
 
 void Tasks::reloadWD(void){
     int c_reload=0;
+    bool reload_ok=false;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
     rt_sem_p(&sem_WD, TM_INFINITE);
+    
+    Message* msg_reloadWD=new Message(MESSAGE_ROBOT_RELOAD_WD);
+    Write(msg_reloadWD);
+    
+    if(rt_task_set_periodic(NULL,TM_NOW,1e9)!=0){cout<<"Problème Task ReloadWD()"<<endl<< flush;};
+    
+    //La travail de la tache commence ici
+    while(1){
+        rt_mutex_acquire(&mutex_reloadWD, TM_INFINITE);
+        reload_ok=b_reloadWD;
+        b_reloadWD=false;
+        rt_mutex_release(&mutex_reloadWD);
+        
+        if (reload_ok){
+            c_reload--;
+            if(c_reload<0)c_reload=0;
+        }else{
+            c_reload++;
+        }
+        if (c_reload>=3){
+            rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+            if ((robot.Close())<0){
+                cout<<"Problème d'extinction du robot ! Attention il devient fou, attrappez le!!! Pokemon! "<<endl<< flush;
+            }else{
+                cout<<"Perte de communication avec le robot. Veuillez le redémarrer wesh !"<<endl<< flush;
+            }
+            rt_mutex_release(&mutex_robot);
+        }
+        rt_task_wait_period(NULL);
+    }
+    
     
     
 }
