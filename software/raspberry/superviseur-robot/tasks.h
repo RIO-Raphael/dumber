@@ -67,8 +67,9 @@ private:
     /**********************************************************************/
     ComMonitor monitor;
     ComRobot robot;
-    int robotStarted = 0;
+    int robotStarted;
     bool b_reloadWD;
+    bool WD;
     int move = MESSAGE_ROBOT_STOP;
     
     /**********************************************************************/
@@ -78,10 +79,9 @@ private:
     RT_TASK th_sendToMon;
     RT_TASK th_receiveFromMon;
     RT_TASK th_openComRobot;
+    RT_TASK th_closeComRobot;
     RT_TASK th_startRobot;
     RT_TASK th_move;
-    RT_TASK th_SWD;
-    RT_TASK th_WD;
     RT_TASK th_reloadWD;
     
     /**********************************************************************/
@@ -91,19 +91,18 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
-    RT_MUTEX mutex_reloadWD;
+    RT_MUTEX mutex_WD;
 
     /**********************************************************************/
     /* Semaphores                                                         */
     /**********************************************************************/
     RT_SEM sem_barrier;
     RT_SEM sem_openComRobot;
+    RT_SEM sem_closeComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
     //FLAG pour voir si la communication est établie avec le robot
     RT_SEM sem_ComRobotCheck;
-    RT_SEM sem_SWD;
-    RT_SEM sem_WD;
     
     
     
@@ -135,6 +134,11 @@ private:
      * @brief Thread opening communication with the robot.
      */
     void OpenComRobot(void *arg);
+    
+    /**
+     * @brief Thread closing communication with the robot.
+     */
+    void CloseComRobot(void *arg);
 
     /**
      * @brief Thread starting the communication with the robot.
@@ -150,16 +154,6 @@ private:
      * @brief Thread reload WD
      */
     void reloadWD(void);
-    
-    /**
-     * @brief Thread starting WD.
-     */
-    void WD(void);
-    
-    /**
-     * @brief Thread Starting without WD.
-     */
-    void SWD(void);
     
     /**********************************************************************/
     /* Queue services                                                     */

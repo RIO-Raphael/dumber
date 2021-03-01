@@ -55,6 +55,8 @@ void Tasks::Init() {
     int status;
     int err;
     b_reloadWD=false;
+    WD=false;
+    robotStarted=0;
 
     /**************************************************************************************/
     /* 	Mutex creation                                                                    */
@@ -75,10 +77,11 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-     if (err = rt_mutex_create(&mutex_reloadWD, NULL)) {
+    if (err = rt_mutex_create(&mutex_WD, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    
     cout << "Mutexes created successfully" << endl << flush;
     
     /**************************************************************************************/
@@ -97,14 +100,6 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_sem_create(&sem_startRobot, NULL, 0, S_FIFO)) {
-        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
-    if (err = rt_sem_create(&sem_SWD, NULL, 0, S_FIFO)) {
-        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
-    if (err = rt_sem_create(&sem_WD, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -135,14 +130,6 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_create(&th_move, "th_move", 0, PRIORITY_TMOVE, 0)) {
-        cerr << "Error task create: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
-    if (err = rt_task_create(&th_WD, "th_WD", 0, PRIORITY_TMOVE, 0)) {
-        cerr << "Error task create: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
-    if (err = rt_task_create(&th_SWD, "th_SWD", 0, PRIORITY_TMOVE, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -195,14 +182,6 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_reloadWD, (void(*)(void*)) & Tasks::reloadWD, this)) {
-        cerr << "Error task start: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
-    if (err = rt_task_start(&th_WD, (void(*)(void*)) & Tasks::WD, this)) {
-        cerr << "Error task start: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
-    if (err = rt_task_start(&th_SWD, (void(*)(void*)) & Tasks::SWD, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -308,8 +287,6 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             exit(-1);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_COM_OPEN)) {
             rt_sem_v(&sem_openComRobot);
-        } else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD)) {
-            rt_sem_v(&sem_startRobot);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) ||
@@ -319,17 +296,16 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_mutex_acquire(&mutex_move, TM_INFINITE);
             move = msgRcv->GetID();
             rt_mutex_release(&mutex_move);
-        }else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITH_WD){
-            rt_sem_broadcast(&sem_WD);
-        }else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD){
-            rt_sem_broadcast(&sem_SWD);
-        }else if (msgRcv->CompareID(MESSAGE_ROBOT_RELOAD_WD){
-            Message* msg_reloadWD=new Message(MESSAGE_ROBOT_START_WITHOUT_WD);
-            //On écrit un message au monitor acquitement
-            WriteInQueue(&q_messageToMon,msg_reloadWD);
-            rt_mutex_acquire(&mutex_reloadWD, TM_INFINITE);
-            b_reloadWD=true;
-            rt_mutex_release(&mutex_reloadWD);
+        }else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITH_WD)){
+            rt_sem_broadcast(&sem_startRobot);
+            rt_mutex_acquire(&mutex_WD, TM_INFINITE);
+            WD=1;
+            rt_mutex_release(&mutex_WD);                    
+        }else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD)) {
+            rt_sem_v(&sem_startRobot);
+            rt_mutex_acquire(&mutex_WD, TM_INFINITE);
+            WD=0;
+            rt_mutex_release(&mutex_WD);
         }
         delete(msgRcv); // mus be deleted manually, no consumer
     }
@@ -369,6 +345,33 @@ void Tasks::OpenComRobot(void *arg) {
 }
 
 /**
+ * @brief Thread closing communication with the robot.
+ */
+void Tasks::CloseComRobot(void *arg) {
+    cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    
+    while(1){
+        rt_sem_p(&sem_closeComRobot, TM_INFINITE);
+        
+        rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+        if (robot.Close()<0){
+            //Fail
+            Message * msgSend=new Message(MESSAGE_ANSWER_ROBOT_ERROR);
+            WriteInQueue(&q_messageToMon, msgSend);
+            cout << "Le robot s'est mal fermé." << endl << flush;
+        }else{
+            //Succes
+            Message * msgSend=new Message(MESSAGE_ANSWER_ACK);
+            WriteInQueue(&q_messageToMon, msgSend);
+            cout << "Le robot s'est bien fermé." << endl << flush;
+        }
+        rt_mutex_release(&mutex_robot);
+    }
+}
+
+/**
  * @brief Thread starting the communication with the robot.
  */
 void Tasks::StartRobotTask(void *arg) {
@@ -383,19 +386,29 @@ void Tasks::StartRobotTask(void *arg) {
 
         Message * msgSend;
         rt_sem_p(&sem_startRobot, TM_INFINITE);
+       
         cout << "Start robot without watchdog (";
         rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-        msgSend = robot.Write(robot.StartWithoutWD());
+        if (WD){
+            //on démarre avec le WD
+            msgSend = robot.Write(robot.StartWithWD());
+        }else{
+            //on démarre sans le WD
+            msgSend = robot.Write(robot.StartWithoutWD());
+        }
         rt_mutex_release(&mutex_robot);
         cout << msgSend->GetID();
         cout << ")" << endl;
-
         cout << "Movement answer: " << msgSend->ToString() << endl << flush;
         WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
-
+        
         if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 1;
+            rt_mutex_release(&mutex_robotStarted);
+        }else{
+            rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
+            robotStarted = 0;
             rt_mutex_release(&mutex_robotStarted);
         }
     }
@@ -476,88 +489,60 @@ Message* Tasks::Write(Message* msg){
     rt_mutex_acquire(&mutex_robot, TM_INFINITE);
     msgSend = robot.Write(msg);
     rt_mutex_release(&mutex_robot);
-    
-}
-
-void Tasks::WD(void){
-    // Synchronization barrier (waiting that all tasks are starting)
-    rt_sem_p(&sem_barrier, TM_INFINITE);
-    rt_sem_p(&sem_WD, TM_INFINITE);
-    
-    Message* msg_ACK;
-    //On écrit un message au robot
-    Message* msg_WD=new Message(MESSAGE_ROBOT_START_WITH_WD);
-    msg_ACK=Write(msg_WD);
-    
-    //On teste le retour du robot
-    if (msg_ACK->CompareID(MESSAGE_ANSWER_ACK)){
-        rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
-        robotStarted = 1;
-        rt_mutex_release(&mutex_robotStarted);
-    }
-    //On écrit un message au monitor acquitement
-    WriteInQueue(&q_messageToMon,msg_ACK);
-}
-
-void Tasks::SWD(void){
-    // Synchronization barrier (waiting that all tasks are starting)
-    rt_sem_p(&sem_barrier, TM_INFINITE);
-    rt_sem_p(&sem_SWD, TM_INFINITE);
-    
-    Message* msg_ACK;
-    //On écrit un message au robot
-    Message* msg_SWD=new Message(MESSAGE_ROBOT_START_WITHOUT_WD);
-    msg_ACK=Write(msg_SWD);
-    
-    //On teste le retour du robot
-    if (msg_ACK->CompareID(MESSAGE_ANSWER_ACK)){
-        rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
-        robotStarted = 1;
-        rt_mutex_release(&mutex_robotStarted);
-    }
-    //On écrit un message au monitor acquitement
-    WriteInQueue(&q_messageToMon,msg_ACK);
-    
+    return msgSend;
     
 }
 
 void Tasks::reloadWD(void){
     int c_reload=0;
-    bool reload_ok=false;
+    bool ok_WD=false;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
-    rt_sem_p(&sem_WD, TM_INFINITE);
     
-    Message* msg_reloadWD=new Message(MESSAGE_ROBOT_RELOAD_WD);
-    Write(msg_reloadWD);
-    
-    if(rt_task_set_periodic(NULL,TM_NOW,1e9)!=0){cout<<"Problème Task ReloadWD()"<<endl<< flush;};
-    
-    //La travail de la tache commence ici
-    while(1){
-        rt_mutex_acquire(&mutex_reloadWD, TM_INFINITE);
-        reload_ok=b_reloadWD;
-        b_reloadWD=false;
-        rt_mutex_release(&mutex_reloadWD);
+    //Etat d'attente
+    while (1){
+        rt_sem_p(&sem_startRobot, TM_INFINITE);
+        // La var WD est mise à 1 dans le receivefromMon
         
-        if (reload_ok){
-            c_reload--;
-            if(c_reload<0)c_reload=0;
-        }else{
-            c_reload++;
-        }
-        if (c_reload>=3){
-            rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-            if ((robot.Close())<0){
-                cout<<"Problème d'extinction du robot ! Attention il devient fou, attrappez le!!! Pokemon! "<<endl<< flush;
+        if(rt_task_set_periodic(NULL,TM_NOW,1e9)!=0){cout<<"Problème Task ReloadWD()"<<endl<< flush;};
+        rt_mutex_acquire(&mutex_WD, TM_INFINITE);
+        ok_WD=WD;
+        rt_mutex_release(&mutex_WD);
+        
+        while(ok_WD){
+            rt_task_wait_period(NULL);
+            
+            //On envoie le message de reload
+            Message* msg_reloadWD=new Message(MESSAGE_ROBOT_RELOAD_WD);
+            msg_reloadWD=Write(msg_reloadWD);
+       
+
+            if (msg_reloadWD->CompareID(MESSAGE_ANSWER_ACK)){
+                c_reload--;
+                if(c_reload<0)c_reload=0;
             }else{
-                cout<<"Perte de communication avec le robot. Veuillez le redémarrer wesh !"<<endl<< flush;
+                c_reload++;
             }
-            rt_mutex_release(&mutex_robot);
+            
+            //On teste le nombre bug
+            if (c_reload>=3){
+                rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+                if ((robot.Close())<0){
+                    cout<<"Problème d'extinction du robot ! Attention il devient fou, attrappez le!!! Pokemon! "<<endl<< flush;
+                }else{
+                    cout<<"Perte de communication avec le robot. Veuillez le redémarrer wesh !"<<endl<< flush;
+                }
+                rt_mutex_release(&mutex_robot);
+            }
+            
+            //MAJ ok_WD
+            rt_mutex_acquire(&mutex_WD, TM_INFINITE);
+            if (c_reload>=3){
+                ok_WD=false;
+            }else{
+                ok_WD=WD;
+            }
+            rt_mutex_release(&mutex_WD);
         }
-        rt_task_wait_period(NULL);
-    }
-    
-    
-    
+    } 
 }
