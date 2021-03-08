@@ -67,6 +67,7 @@ private:
     /**********************************************************************/
     ComMonitor monitor;
     ComRobot robot;
+    Camera cam;
     int robotStarted;
     bool b_reloadWD;
     bool WD;
@@ -83,6 +84,7 @@ private:
     RT_TASK th_startRobot;
     RT_TASK th_move;
     RT_TASK th_reloadWD;
+    RT_TASK th_openCamera;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -92,6 +94,7 @@ private:
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_WD;
+    RT_MUTEX mutex_cam;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -103,8 +106,8 @@ private:
     RT_SEM sem_startRobot;
     //FLAG pour voir si la communication est établie avec le robot
     RT_SEM sem_ComRobotCheck;
-    
-    
+    RT_SEM sem_Reload;
+    RT_SEM sem_openCamera;
     
     /**********************************************************************/
     /* Message queues                                                     */
@@ -154,6 +157,11 @@ private:
      * @brief Thread reload WD
      */
     void reloadWD(void);
+    
+    /**
+     * @brief OpenCamera
+     */
+    void OpenCamera(void);
     
     /**********************************************************************/
     /* Queue services                                                     */

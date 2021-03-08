@@ -81,6 +81,11 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_cam, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    
     
     cout << "Mutexes created successfully" << endl << flush;
     
@@ -100,6 +105,14 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_sem_create(&sem_startRobot, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_sem_create(&sem_Reload, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_sem_create(&sem_openCamera, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -134,6 +147,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_create(&th_reloadWD, "th_reloadWD", 0, PRIORITY_TMOVE, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_openCamera, "th_openCamera", 0, PRIORITY_TMOVE, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -182,6 +199,10 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_reloadWD, (void(*)(void*)) & Tasks::reloadWD, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_openCamera, (void(*)(void*)) & Tasks::OpenCamera, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -306,6 +327,9 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_mutex_acquire(&mutex_WD, TM_INFINITE);
             WD=0;
             rt_mutex_release(&mutex_WD);
+        }else if (msgRcv->CompareID(MESSAGE_CAM_OPEN)) {
+            cout << "Avec supplément chocolat !" << endl;
+            rt_sem_v(&sem_openCamera);
         }
         delete(msgRcv); // mus be deleted manually, no consumer
     }
@@ -387,25 +411,32 @@ void Tasks::StartRobotTask(void *arg) {
         Message * msgSend;
         rt_sem_p(&sem_startRobot, TM_INFINITE);
        
-        cout << "Start robot without watchdog (";
+        
         rt_mutex_acquire(&mutex_robot, TM_INFINITE);
         if (WD){
             //on démarre avec le WD
             msgSend = robot.Write(robot.StartWithWD());
+            cout << "Start robot with watchdog (";
         }else{
             //on démarre sans le WD
             msgSend = robot.Write(robot.StartWithoutWD());
+            cout << "Start robot without watchdog (";
         }
         rt_mutex_release(&mutex_robot);
         cout << msgSend->GetID();
         cout << ")" << endl;
-        cout << "Movement answer: " << msgSend->ToString() << endl << flush;
+        cout << "Movement answer: " << msgSend->ToString() << endl;
         WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
         
         if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 1;
             rt_mutex_release(&mutex_robotStarted);
+            rt_mutex_acquire(&mutex_WD, TM_INFINITE);
+            if(WD==1){
+               rt_sem_broadcast(&sem_Reload); 
+            }          
+            rt_mutex_release(&mutex_WD);
         }else{
             rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
             robotStarted = 0;
@@ -494,17 +525,20 @@ Message* Tasks::Write(Message* msg){
 }
 
 void Tasks::reloadWD(void){
-    int c_reload=0;
     bool ok_WD=false;
+    int compt_erreur_ACK=0;
+    int rs=0;
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
     
+    if(rt_task_set_periodic(NULL,TM_NOW,1e9)!=0){cout<<"Problème Task ReloadWD()"<<endl;};
+    
     //Etat d'attente
     while (1){
-        rt_sem_p(&sem_startRobot, TM_INFINITE);
-        // La var WD est mise à 1 dans le receivefromMon
+        rt_sem_p(&sem_Reload, TM_INFINITE);
+
         
-        if(rt_task_set_periodic(NULL,TM_NOW,1e9)!=0){cout<<"Problème Task ReloadWD()"<<endl<< flush;};
+        // La var WD est mise à 1 dans le receivefromMon        
         rt_mutex_acquire(&mutex_WD, TM_INFINITE);
         ok_WD=WD;
         rt_mutex_release(&mutex_WD);
@@ -512,37 +546,74 @@ void Tasks::reloadWD(void){
         while(ok_WD){
             rt_task_wait_period(NULL);
             
-            //On envoie le message de reload
-            Message* msg_reloadWD=new Message(MESSAGE_ROBOT_RELOAD_WD);
-            msg_reloadWD=Write(msg_reloadWD);
-       
-
-            if (msg_reloadWD->CompareID(MESSAGE_ANSWER_ACK)){
-                c_reload--;
-                if(c_reload<0)c_reload=0;
-            }else{
-                c_reload++;
-            }
+            //On vérifie que le robot soit encore actif
+            rt_mutex_acquire(&mutex_robotStarted, TM_INFINITE);
+            rs = robotStarted;
+            rt_mutex_release(&mutex_robotStarted);
             
-            //On teste le nombre bug
-            if (c_reload>=3){
-                rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-                if ((robot.Close())<0){
-                    cout<<"Problème d'extinction du robot ! Attention il devient fou, attrappez le!!! Pokemon! "<<endl<< flush;
+            if (rs==1){
+            
+                //On envoie le message de reload
+                Message* msg_reloadWD=new Message(MESSAGE_ROBOT_RELOAD_WD);
+                msg_reloadWD=Write(msg_reloadWD);
+                
+                //On regarde la réponse
+                if (!(msg_reloadWD->CompareID(MESSAGE_ANSWER_ACK))){
+                    compt_erreur_ACK++;
                 }else{
-                    cout<<"Perte de communication avec le robot. Veuillez le redémarrer wesh !"<<endl<< flush;
+                    compt_erreur_ACK--;
+                    if (compt_erreur_ACK<=0){compt_erreur_ACK=0;}
                 }
-                rt_mutex_release(&mutex_robot);
+                cout << "Message Reload envoyé" << endl;
+            }else{
+                rt_mutex_acquire(&mutex_WD, TM_INFINITE);
+                WD=0;
+                cout << "On arrête le Watchdog." << endl;
+                rt_mutex_release(&mutex_WD);
             }
             
-            //MAJ ok_WD
-            rt_mutex_acquire(&mutex_WD, TM_INFINITE);
-            if (c_reload>=3){
-                ok_WD=false;
+            cout << "Compteur ACK : " << compt_erreur_ACK <<endl <<endl <<endl;
+            
+            if (compt_erreur_ACK>2){
+                ok_WD=0;
+                //Eteindre le robot
+                cout << "On éteint le robot." << endl;
+                rt_sem_broadcast(&sem_closeComRobot);
             }else{
+                //MAJ ok_WD
+                rt_mutex_acquire(&mutex_WD, TM_INFINITE);
                 ok_WD=WD;
+                rt_mutex_release(&mutex_WD);
             }
-            rt_mutex_release(&mutex_WD);
         }
     } 
+}
+
+void Tasks::OpenCamera(){
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    
+    while (1){
+        //On attend l'ordre d'ouvrir la caméra
+        rt_sem_p(&sem_openCamera, TM_INFINITE);
+
+        Message* msgSend;
+        //On va allumer la cam
+        rt_mutex_acquire(&mutex_cam, TM_INFINITE);
+        if (cam.Open()){
+            //La caméra est ouverte
+            msgSend = new Message(MESSAGE_ANSWER_ACK);
+            WriteInQueue(&q_messageToMon, msgSend);
+
+            cout << "la caméra est allumée" << endl;
+            cout << "On lance l'acquisition de l'image." << endl;
+        }else{
+            //La caméra n'est pas ouverte
+            msgSend = new Message(MESSAGE_ANSWER_NACK);
+            WriteInQueue(&q_messageToMon, msgSend);
+
+            cout << "la caméra n'est pas allumée" << endl;
+        }
+        rt_mutex_release(&mutex_cam);
+    }   
 }
