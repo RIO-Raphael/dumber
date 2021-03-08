@@ -67,11 +67,15 @@ private:
     /**********************************************************************/
     ComMonitor monitor;
     ComRobot robot;
-    Camera cam;
+    Camera cam=Camera(sm, 15);
     int robotStarted;
+    int perteComRobot;
     bool b_reloadWD;
     bool WD;
     int move = MESSAGE_ROBOT_STOP;
+    bool shutCamera;
+    bool send_image;
+    //Img image;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -85,6 +89,7 @@ private:
     RT_TASK th_move;
     RT_TASK th_reloadWD;
     RT_TASK th_openCamera;
+    RT_TASK th_useCamera;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -95,7 +100,10 @@ private:
     RT_MUTEX mutex_move;
     RT_MUTEX mutex_WD;
     RT_MUTEX mutex_cam;
-
+    RT_MUTEX mutex_shutCamera;
+    RT_MUTEX mutex_send_image;
+    RT_MUTEX mutex_image;
+    RT_MUTEX mutex_perteComRobot;
     /**********************************************************************/
     /* Semaphores                                                         */
     /**********************************************************************/
@@ -108,6 +116,7 @@ private:
     RT_SEM sem_ComRobotCheck;
     RT_SEM sem_Reload;
     RT_SEM sem_openCamera;
+    RT_SEM sem_useCamera;
     
     /**********************************************************************/
     /* Message queues                                                     */
@@ -156,12 +165,17 @@ private:
     /**
      * @brief Thread reload WD
      */
-    void reloadWD(void);
+    void reloadWD();
     
     /**
      * @brief OpenCamera
      */
-    void OpenCamera(void);
+    void OpenCamera();
+    
+    /**
+     * @brief Send images
+     */
+    void UseCamera();
     
     /**********************************************************************/
     /* Queue services                                                     */
@@ -181,7 +195,7 @@ private:
     Message *ReadInQueue(RT_QUEUE *queue);
     
     //On écrit un message et on envoie un ordre au robot
-    Message *Write(Message* msg);
+    Message *WriteToRobot(Message* orderRobot);
 
 };
 

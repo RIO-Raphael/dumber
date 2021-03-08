@@ -85,6 +85,18 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_mutex_create(&mutex_shutCamera, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_mutex_create(&mutex_send_image, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_mutex_create(&mutex_image, NULL)) {
+        cerr << "Error mutex create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
     
     
     cout << "Mutexes created successfully" << endl << flush;
@@ -113,6 +125,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_sem_create(&sem_openCamera, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_sem_create(&sem_useCamera, NULL, 0, S_FIFO)) {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -151,6 +167,10 @@ void Tasks::Init() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_create(&th_openCamera, "th_openCamera", 0, PRIORITY_TMOVE, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_useCamera, "th_useCamera", 0, PRIORITY_TMOVE, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -203,6 +223,14 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_openCamera, (void(*)(void*)) & Tasks::OpenCamera, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_openCamera, (void(*)(void*)) & Tasks::OpenCamera, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+     if (err = rt_task_start(&th_useCamera, (void(*)(void*)) & Tasks::UseCamera, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -410,19 +438,18 @@ void Tasks::StartRobotTask(void *arg) {
 
         Message * msgSend;
         rt_sem_p(&sem_startRobot, TM_INFINITE);
-       
         
-        rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+        perteComRobot=0;
+        
         if (WD){
             //on démarre avec le WD
-            msgSend = robot.Write(robot.StartWithWD());
+            msgSend = WriteToRobot(robot.StartWithWD());
             cout << "Start robot with watchdog (";
         }else{
             //on démarre sans le WD
-            msgSend = robot.Write(robot.StartWithoutWD());
+            msgSend = WriteToRobot(robot.StartWithoutWD());
             cout << "Start robot without watchdog (";
         }
-        rt_mutex_release(&mutex_robot);
         cout << msgSend->GetID();
         cout << ")" << endl;
         cout << "Movement answer: " << msgSend->ToString() << endl;
@@ -473,10 +500,8 @@ void Tasks::MoveTask(void *arg) {
             rt_mutex_release(&mutex_move);
             
             cout << " move: " << cpMove;
-            
-            rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-            robot.Write(new Message((MessageID)cpMove));
-            rt_mutex_release(&mutex_robot);
+          
+            WriteToRobot(new Message((MessageID)cpMove));
         }
         cout << endl << flush;
     }
@@ -515,13 +540,47 @@ Message *Tasks::ReadInQueue(RT_QUEUE *queue) {
 }
 
 //On écrit un message et on envoie un ordre au robot
-Message* Tasks::Write(Message* msg){
-    Message* msgSend;
+/**
+ * Envoie un ordre au robot. Gestion de la perte de communication avec le robot
+ * @param msg Message à envoyer au robot
+ * @return Message de retour provenant du robot
+ */
+Message* Tasks::WriteToRobot(Message* orderRobot){
+    Message* answerRobot;
+    Message* msgRobotComClose;
+   
     rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-    msgSend = robot.Write(msg);
+    answerRobot = robot.Write(orderRobot);
     rt_mutex_release(&mutex_robot);
-    return msgSend;
-    
+    //Ici vérification que le message a bien été écrit
+    //si c'est le cas : mettre à zéro la variable globale perte_ComRobot
+    //si ce n'est pas le cas : incrémenter la variable perte_ComRobot
+    /* Note : le codeur a estimé qu'une erreur de communication peut prendre
+     * plusieurs formes. Notamment, la connexion est estimée perdue si :
+     * - le timeout est dépassé,
+     * - la commande n'est pas reconnue,
+     * - la commande n'est pas conforme à sa définition
+     * et ce, au moins trois fois d'affilée.
+     */
+    rt_mutex_acquire(&mutex_perteComRobot, TM_INFINITE);
+    if (answerRobot->CompareID(MESSAGE_ANSWER_ROBOT_TIMEOUT)
+        || answerRobot->CompareID(MESSAGE_ANSWER_ROBOT_UNKNOWN_COMMAND)
+        || answerRobot->CompareID(MESSAGE_ANSWER_ROBOT_ERROR)) {
+        perteComRobot++;
+        //cout << "ERROR ++" << endl << flush;
+    }
+    else {
+        perteComRobot = 0;
+        //cout << "ERROR = 0" << endl << flush;
+    }
+    //Gestion de perteComRobot
+    if (perteComRobot > 3){
+        cout << "COMROBOT LOST" << endl << flush;
+        msgRobotComClose = new Message(MESSAGE_ANSWER_COM_ERROR);
+        WriteInQueue(&q_messageToMon, msgRobotComClose); // msg is deleted after being sent
+    }
+    rt_mutex_release(&mutex_perteComRobot);
+    return answerRobot;
 }
 
 void Tasks::reloadWD(void){
@@ -555,7 +614,7 @@ void Tasks::reloadWD(void){
             
                 //On envoie le message de reload
                 Message* msg_reloadWD=new Message(MESSAGE_ROBOT_RELOAD_WD);
-                msg_reloadWD=Write(msg_reloadWD);
+                msg_reloadWD=WriteToRobot(msg_reloadWD);
                 
                 //On regarde la réponse
                 if (!(msg_reloadWD->CompareID(MESSAGE_ANSWER_ACK))){
@@ -605,7 +664,14 @@ void Tasks::OpenCamera(){
             msgSend = new Message(MESSAGE_ANSWER_ACK);
             WriteInQueue(&q_messageToMon, msgSend);
 
+            //On initialise les var cam
+            //Pas besoin du mutex car les autres taches ne tournent pas encore
+            shutCamera=false;
+            send_image=true;
             cout << "la caméra est allumée" << endl;
+            
+            //On lance l'acquisition des images
+            rt_sem_broadcast(&sem_useCamera);
             cout << "On lance l'acquisition de l'image." << endl;
         }else{
             //La caméra n'est pas ouverte
@@ -615,5 +681,48 @@ void Tasks::OpenCamera(){
             cout << "la caméra n'est pas allumée" << endl;
         }
         rt_mutex_release(&mutex_cam);
+    }   
+}
+
+void Tasks::UseCamera(){
+    bool shutCamAux=false;
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    
+    if(rt_task_set_periodic(NULL,TM_NOW,1e8)!=0){cout<<"Problème Task UseCamera()"<<endl;}; //100ms
+    
+    while (1){
+        //On attend l'ordre d'ouvrir la caméra
+        rt_sem_p(&sem_useCamera, TM_INFINITE);
+        
+        while (!shutCamAux){
+            //ON attend la période
+            rt_task_wait_period(NULL);
+            
+            //On regarde si on doit envoyer les images
+            rt_mutex_acquire(&mutex_send_image, TM_INFINITE);
+            if (send_image){
+                //On aurait pu faire qu'un seul mutex
+                rt_mutex_acquire(&mutex_image, TM_INFINITE);
+                rt_mutex_acquire(&mutex_cam, TM_INFINITE);
+                Img image=cam.Grab();
+                cout << image.ToString();
+                MessageImg* msgImg = new MessageImg(MESSAGE_CAM_IMAGE,&image);
+                WriteInQueue(&q_messageToMon, msgImg);
+                rt_mutex_release(&mutex_cam);
+                rt_mutex_release(&mutex_image);
+            }
+            rt_mutex_release(&mutex_send_image);
+            
+            //MAJ shutCamAux
+            rt_mutex_acquire(&mutex_shutCamera, TM_INFINITE);
+            shutCamAux=shutCamera;
+            rt_mutex_release(&mutex_shutCamera);
+            
+        }
+        
+        //On regarde si on eteint la cam entre temps
+       
+        
     }   
 }
