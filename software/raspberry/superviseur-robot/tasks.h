@@ -67,10 +67,15 @@ private:
     /**********************************************************************/
     ComMonitor monitor;
     ComRobot robot;
-    int robotStarted = 0;
+    Camera cam=Camera(sm, 15);
+    int robotStarted;
+    int perteComRobot;
+    bool b_reloadWD;
+    bool WD;
     int move = MESSAGE_ROBOT_STOP;
-    //Compteur pour la perte de co avec le robot
-    int perte_comRobot = 0;
+    bool shutCamera;
+    bool send_image;
+    //Img image;
     
     /**********************************************************************/
     /* Tasks                                                              */
@@ -79,12 +84,12 @@ private:
     RT_TASK th_sendToMon;
     RT_TASK th_receiveFromMon;
     RT_TASK th_openComRobot;
+    RT_TASK th_closeComRobot;
     RT_TASK th_startRobot;
     RT_TASK th_move;
-    RT_TASK th_checkBattery;
-    RT_TASK th_SWD;
-    RT_TASK th_WD;
-    RT_TASK th_reload_WD;
+    RT_TASK th_reloadWD;
+    RT_TASK th_openCamera;
+    RT_TASK th_useCamera;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -93,21 +98,25 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
-    RT_MUTEX mutex_pertecomRobot;
-
+    RT_MUTEX mutex_WD;
+    RT_MUTEX mutex_cam;
+    RT_MUTEX mutex_shutCamera;
+    RT_MUTEX mutex_send_image;
+    RT_MUTEX mutex_image;
+    RT_MUTEX mutex_perteComRobot;
     /**********************************************************************/
     /* Semaphores                                                         */
     /**********************************************************************/
     RT_SEM sem_barrier;
     RT_SEM sem_openComRobot;
+    RT_SEM sem_closeComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
     //FLAG pour voir si la communication est établie avec le robot
     RT_SEM sem_ComRobotCheck;
-    RT_SEM sem_SWD;
-    RT_SEM sem_WD;
-    
-    
+    RT_SEM sem_Reload;
+    RT_SEM sem_openCamera;
+    RT_SEM sem_useCamera;
     
     /**********************************************************************/
     /* Message queues                                                     */
@@ -137,6 +146,11 @@ private:
      * @brief Thread opening communication with the robot.
      */
     void OpenComRobot(void *arg);
+    
+    /**
+     * @brief Thread closing communication with the robot.
+     */
+    void CloseComRobot(void *arg);
 
     /**
      * @brief Thread starting the communication with the robot.
@@ -149,9 +163,19 @@ private:
     void MoveTask(void *arg);
     
     /**
-     * @brief Thread handling battery checking.
+     * @brief Thread reload WD
      */
-    void CheckBattery(void *arg);
+    void reloadWD();
+    
+    /**
+     * @brief OpenCamera
+     */
+    void OpenCamera();
+    
+    /**
+     * @brief Send images
+     */
+    void UseCamera();
     
     /**********************************************************************/
     /* Queue services                                                     */
@@ -171,7 +195,7 @@ private:
     Message *ReadInQueue(RT_QUEUE *queue);
     
     //On écrit un message et on envoie un ordre au robot
-    Message *Write(Message* msg);
+    Message *WriteToRobot(Message* orderRobot);
 
 };
 
