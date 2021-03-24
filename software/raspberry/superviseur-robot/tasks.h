@@ -68,7 +68,7 @@ private:
     ComMonitor monitor;
     ComRobot robot;
     Camera cam=Camera(sm, 15);
-    int robotStarted;
+    int robotStarted = 0;
     int perteComRobot;
     bool b_reloadWD;
     bool WD;
@@ -90,6 +90,7 @@ private:
     RT_TASK th_reloadWD;
     RT_TASK th_openCamera;
     RT_TASK th_useCamera;
+    RT_TASK th_checkBattery;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -176,6 +177,11 @@ private:
      * @brief Send images
      */
     void UseCamera();
+
+    /**
+     * @brief Thread handling battery checking.
+     */
+    void CheckBattery(void *arg);
     
     /**********************************************************************/
     /* Queue services                                                     */

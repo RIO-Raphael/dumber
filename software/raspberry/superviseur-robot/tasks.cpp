@@ -28,6 +28,9 @@
 #define PRIORITY_TCAMERA 21
 #define PRIORITY_TCHECKBATTERY 20
 #define CST_PERTE_MEDIUM_ROBOT 3
+#define PRIORITY_RELOAD 4
+#define PRIORITY_OPENCAM 25
+#define PRIORITY_USECAM 25
 
 /*
  * Some remarks:
@@ -97,8 +100,7 @@ void Tasks::Init() {
     if (err = rt_mutex_create(&mutex_image, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
-    }
-    
+    }    
     
     cout << "Mutexes created successfully" << endl << flush;
     
@@ -163,15 +165,19 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_task_create(&th_reloadWD, "th_reloadWD", 0, PRIORITY_TMOVE, 0)) {
+    if (err = rt_task_create(&th_reloadWD, "th_reloadWD", 0, PRIORITY_RELOAD, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_task_create(&th_openCamera, "th_openCamera", 0, PRIORITY_TMOVE, 0)) {
+    if (err = rt_task_create(&th_openCamera, "th_openCamera", 0, PRIORITY_OPENCAM, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_task_create(&th_useCamera, "th_useCamera", 0, PRIORITY_TMOVE, 0)) {
+    if (err = rt_task_create(&th_useCamera, "th_useCamera", 0, PRIORITY_USECAM, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_create(&th_checkBattery, "th_checkBattery", 0, PRIORITY_TCHECKBATTERY, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -232,6 +238,10 @@ void Tasks::Run() {
         exit(EXIT_FAILURE);
     }
      if (err = rt_task_start(&th_useCamera, (void(*)(void*)) & Tasks::UseCamera, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    if (err = rt_task_start(&th_checkBattery, (void(*)(void*)) & Tasks::CheckBattery, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -514,6 +524,7 @@ void Tasks::MoveTask(void *arg) {
 void Tasks::CheckBattery(void *arg){
     int rs;
     MessageBattery* msg;
+    Message* LevelBat;
     
     cout << "Start " << __PRETTY_FUNCTION__ << endl << flush;
     // Synchronization barrier (waiting that all tasks are starting)
@@ -531,14 +542,17 @@ void Tasks::CheckBattery(void *arg){
         if (rs == 1) {
             rt_task_wait_period(NULL);
             cout << "Periodic checking of battery level : " << endl << flush;
-            rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-            msg = (MessageBattery*)robot.Write(robot.GetBattery());
-            rt_mutex_release(&mutex_robot);
-            WriteInQueue(&q_messageToMon, msg); // or monitor.Write(msg); 
-            // msg is deleted after being sent
+            LevelBat = (MessageBattery*)WriteToRobot(robot.GetBattery());
+            // The ID of LevelBat must be checked to ensure that it 
+            // contains a battery level
+            if (LevelBat->GetID() == MESSAGE_ROBOT_BATTERY_LEVEL) {
+                WriteInQueue(&q_messageToMon, LevelBat); // or monitor.Write(msg); 
+                // msg is deleted after being sent
+            }
         }
     }
 }
+
 
 /**********************************************************************/
 /* Queue services                                                     */
