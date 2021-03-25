@@ -18,17 +18,19 @@
 #include "tasks.h"
 #include <stdexcept>
 
+//CST
+#define CST_PERTE_MEDIUM_ROBOT 3
+
 // Déclaration des priorités des taches
 #define PRIORITY_TSERVER 30
 #define PRIORITY_TOPENCOMROBOT 20
 #define PRIORITY_TMOVE 20
-#define PRIORITY_TSENDTOMON 22
+#define PRIORITY_TSENDTOMON 15          //Plus priorité pour respecter le délai de 100ms
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
 #define PRIORITY_TCAMERA 21
 #define PRIORITY_TCHECKBATTERY 20
-#define CST_PERTE_MEDIUM_ROBOT 3
-#define PRIORITY_RELOAD 4
+#define PRIORITY_RELOAD 4               //Thread le plus critique lorsque le mode "avec WD" est lancé
 #define PRIORITY_OPENCAM 25
 #define PRIORITY_USECAM 25
 
